@@ -2,107 +2,174 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>天鱼管理页面</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/keywords.css">
+    <style>
+        .card { box-shadow: 0 2px 12px rgba(0,0,0,0.07); border-radius: 12px; }
+        .section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; color: #2c3e50; }
+        .form-label { font-weight: 500; }
+        .form-check-inline { margin-right: 1.2em; }
+        .form-check-input { width: 1.1em; height: 1.1em; margin-top: 0; margin-right: 0.3em; vertical-align: middle; }
+        .form-check-label { vertical-align: middle; }
+        .table-striped>tbody>tr:nth-of-type(odd) { background-color: #f8f9fa; }
+        .table-hover tbody tr:hover { background-color: #e9ecef; }
+        .form-text { color: #888; font-size: 0.95em; }
+        .divider { border-bottom: 1.5px solid #e0e0e0; margin: 2rem 0 1.5rem 0; }
+        @media (max-width: 767.98px) {
+            .card { margin-bottom: 1rem; }
+            .section-title { font-size: 1.1rem; }
+            .form-label, .form-text { font-size: 0.98em; }
+            .table-responsive { font-size: 0.98em; }
+            .btn, input:not([type="checkbox"]):not([type="radio"]), select, .form-control {
+                font-size: 1em;
+                min-height: 2.5rem;
+            }
+            input[type="checkbox"], input[type="radio"] {
+                min-height: unset !important;
+                height: 1.1em !important;
+                width: 1.1em !important;
+            }
+            .table th, .table td { padding: 0.5rem 0.3rem; }
+            .col-md-6, .col-md-4, .col-md-3, .col-md-2, .col-md-1 { flex: 0 0 100%; max-width: 100%; }
+            .text-end { text-align: left !important; }
+            .mt-md-0 { margin-top: 0 !important; }
+            .mt-3 { margin-top: 1rem !important; }
+            .d-flex.justify-content-end { justify-content: flex-start !important; }
+            .btn-sm {
+                width: auto !important;
+                min-width: 2.5rem;
+                font-size: 1em;
+                padding: 0.375rem 0.75rem;
+            }
+        }
+    </style>
 </head>
 <body class="bg-light">
-    <div class="container py-4">
-        <h1 class="mb-4">天鱼群管处理页面 for WTBU</h1>
-        <div class="card mb-4">
+    <div class="container py-3 px-1 px-sm-2">
+        <h1 class="mb-4 text-center" style="font-size:2rem;">天鱼群管处理页面 <span class="fs-6 text-secondary">for WTBU</span></h1>
+        <div class="card mb-4 p-2">
             <div class="card-body">
-                <form method="post" action="/keywords" id="add-form" class="row gy-2 gx-3 align-items-center">
-                    <div class="col-auto">
-                        <input name="keyword" class="form-control" placeholder="关键词" required>
+                <div class="section-title">入群欢迎设置</div>
+                <form method="post" action="/welcome_config" id="welcome-form" class="row gy-2 gx-3 align-items-center">
+                    <div class="col-md-6 col-12 mb-2">
+                        <label for="welcome-message" class="form-label mb-1">入群欢迎消息</label>
+                        <input name="welcome_message" id="welcome-message" class="form-control" placeholder="欢迎新成员的内容" value="{{ welcome_config.message|default('') }}">
+                        <div class="form-text">新成员入群时自动发送的消息，可自定义内容。</div>
                     </div>
-                    <div class="col-auto">
-                        <div class="d-flex flex-wrap align-items-center gap-2">
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" name="action" value="reply" id="action-reply" onchange="onActionChangeCheckbox()">
-                                <label class="form-check-label" for="action-reply">回复</label>
-                            </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" name="action" value="ban" id="action-ban" onchange="onActionChangeCheckbox()">
-                                <label class="form-check-label" for="action-ban">禁言</label>
-                            </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" name="action" value="kick" id="action-kick" onchange="onActionChangeCheckbox()">
-                                <label class="form-check-label" for="action-kick">踢出</label>
-                            </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" name="action" value="recall" id="action-recall" onchange="onActionChangeCheckbox()">
-                                <label class="form-check-label" for="action-recall">撤回</label>
-                            </div>
+                    <div class="col-md-3 col-12 d-flex align-items-center mb-2">
+                        <div class="form-check d-inline-flex align-items-center">
+                            <input class="form-check-input" type="checkbox" name="welcome_enabled" id="welcome-enabled" value="1" {% if welcome_config.enabled %}checked{% endif %}>
+                            <label class="form-check-label ms-1" for="welcome-enabled">启用入群欢迎</label>
                         </div>
                     </div>
-                    <div class="col-auto">
-                        <input name="reply" class="form-control" placeholder="回复内容" id="reply-input" style="display:none;">
-                    </div>
-                    <div class="col-auto">
-                        <input name="duration" type="number" class="form-control" placeholder="禁言秒数" id="duration-input" style="display:none;">
-                    </div>
-                    <input type="hidden" name="idx" value="">
-                    <div class="col-auto">
-                        <button type="submit" class="btn btn-primary">添加</button>
+                    <div class="col-md-3 col-12 text-end mb-2">
+                        <button type="submit" class="btn btn-primary w-100 w-md-auto px-4">保存欢迎设置</button>
                     </div>
                 </form>
             </div>
         </div>
+        <div class="divider"></div>
+        <div class="card mb-4 p-2">
+            <div class="card-body">
+                <div class="section-title">关键词自动处理</div>
+                <form method="post" action="/" id="add-form" class="row gy-2 gx-3 align-items-center">
+                    <div class="col-md-3 col-12 mb-2">
+                        <input name="keyword" class="form-control" placeholder="关键词" required>
+                    </div>
+                    <div class="col-md-4 col-12 mb-2">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <div class="form-check d-inline-flex align-items-center">
+                                <input class="form-check-input" type="checkbox" name="action" value="reply" id="action-reply" onchange="onActionChangeCheckbox()">
+                                <label class="form-check-label ms-1" for="action-reply">回复</label>
+                            </div>
+                            <div class="form-check d-inline-flex align-items-center">
+                                <input class="form-check-input" type="checkbox" name="action" value="ban" id="action-ban" onchange="onActionChangeCheckbox()">
+                                <label class="form-check-label ms-1" for="action-ban">禁言</label>
+                            </div>
+                            <div class="form-check d-inline-flex align-items-center">
+                                <input class="form-check-input" type="checkbox" name="action" value="kick" id="action-kick" onchange="onActionChangeCheckbox()">
+                                <label class="form-check-label ms-1" for="action-kick">踢出</label>
+                            </div>
+                            <div class="form-check d-inline-flex align-items-center">
+                                <input class="form-check-input" type="checkbox" name="action" value="recall" id="action-recall" onchange="onActionChangeCheckbox()">
+                                <label class="form-check-label ms-1" for="action-recall">撤回</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2 col-12 mb-2">
+                        <input name="reply" class="form-control" placeholder="回复内容" id="reply-input" style="display:none;">
+                    </div>
+                    <div class="col-md-2 col-12 mb-2">
+                        <input name="duration" type="number" class="form-control" placeholder="禁言秒数" id="duration-input" style="display:none;">
+                    </div>
+                    <input type="hidden" name="idx" value="">
+                    <div class="col-md-1 col-12 text-end mb-2">
+                        <button type="submit" class="btn btn-primary w-100 w-md-auto">添加</button>
+                    </div>
+                </form>
+                <div class="form-text mt-2">可设置多个关键词及对应操作，支持批量保存。</div>
+            </div>
+        </div>
         <div class="card">
             <div class="card-body">
+                <div class="section-title mb-2">关键词列表</div>
                 <div class="table-responsive">
-                    <table class="table table-bordered align-middle mb-0">
+                    <table class="table table-bordered table-striped table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr><th>关键词</th><th>类型</th><th>回复内容</th><th>禁言秒数</th><th>操作</th></tr>
                         </thead>
                         <tbody>
                         {% for kw in keywords %}
                             <tr>
-                                <form method="post" action="/keywords" class="row g-2 align-items-center">
+                                <form method="post" action="/" class="row g-2 align-items-center">
                                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                                 <td><input name="keyword" class="form-control" value="{{ kw.keyword }}" required></td>
                                 <td>
                                     <div class="d-flex flex-wrap align-items-center gap-2">
-                                        <div class="form-check form-check-inline">
+                                        <div class="form-check d-inline-flex align-items-center">
                                             <input class="form-check-input" type="checkbox" name="action" value="reply" id="action-reply-{{ loop.index0 }}" onchange="onRowActionChangeCheckbox(this, {{ loop.index0 }})" {% if 'reply' in (kw.action if kw.action is iterable and not kw.action is string else [kw.action]) %}checked{% endif %}>
-                                            <label class="form-check-label" for="action-reply-{{ loop.index0 }}">回复</label>
+                                            <label class="form-check-label ms-1" for="action-reply-{{ loop.index0 }}">回复</label>
                                         </div>
-                                        <div class="form-check form-check-inline">
+                                        <div class="form-check d-inline-flex align-items-center">
                                             <input class="form-check-input" type="checkbox" name="action" value="ban" id="action-ban-{{ loop.index0 }}" onchange="onRowActionChangeCheckbox(this, {{ loop.index0 }})" {% if 'ban' in (kw.action if kw.action is iterable and not kw.action is string else [kw.action]) %}checked{% endif %}>
-                                            <label class="form-check-label" for="action-ban-{{ loop.index0 }}">禁言</label>
+                                            <label class="form-check-label ms-1" for="action-ban-{{ loop.index0 }}">禁言</label>
                                         </div>
-                                        <div class="form-check form-check-inline">
+                                        <div class="form-check d-inline-flex align-items-center">
                                             <input class="form-check-input" type="checkbox" name="action" value="kick" id="action-kick-{{ loop.index0 }}" onchange="onRowActionChangeCheckbox(this, {{ loop.index0 }})" {% if 'kick' in (kw.action if kw.action is iterable and not kw.action is string else [kw.action]) %}checked{% endif %}>
-                                            <label class="form-check-label" for="action-kick-{{ loop.index0 }}">踢出</label>
+                                            <label class="form-check-label ms-1" for="action-kick-{{ loop.index0 }}">踢出</label>
                                         </div>
-                                        <div class="form-check form-check-inline">
+                                        <div class="form-check d-inline-flex align-items-center">
                                             <input class="form-check-input" type="checkbox" name="action" value="recall" id="action-recall-{{ loop.index0 }}" onchange="onRowActionChangeCheckbox(this, {{ loop.index0 }})" {% if 'recall' in (kw.action if kw.action is iterable and not kw.action is string else [kw.action]) %}checked{% endif %}>
-                                            <label class="form-check-label" for="action-recall-{{ loop.index0 }}">撤回</label>
+                                            <label class="form-check-label ms-1" for="action-recall-{{ loop.index0 }}">撤回</label>
                                         </div>
                                     </div>
                                 </td>
                                 <td><input name="reply" class="form-control" value="{{ kw.reply if ('reply' in (kw.action if kw.action is iterable and not kw.action is string else [kw.action])) else '' }}" {% if 'reply' not in (kw.action if kw.action is iterable and not kw.action is string else [kw.action]) %}style="display:none;"{% endif %}></td>
                                 <td><input name="duration" type="number" class="form-control" value="{{ kw.duration if ('ban' in (kw.action if kw.action is iterable and not kw.action is string else [kw.action])) else '' }}" {% if 'ban' not in (kw.action if kw.action is iterable and not kw.action is string else [kw.action]) %}style="display:none;"{% endif %}></td>
                                 <td>
-                                    <button type="submit" class="btn btn-success btn-sm">保存</button>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <button type="submit" class="btn btn-success btn-sm">保存</button>
                                 </form>
-                                <form method="post" action="/keywords/delete/{{ loop.index0 }}" style="display:inline;">
-                                    <button type="submit" class="btn btn-danger btn-sm">删除</button>
-                                </form>
+                                <form method="post" action="/delete/{{ loop.index0 }}" style="display:inline;">
+                                        <button type="submit" class="btn btn-danger btn-sm">删除</button>
+                                    </form>
+                                    </div>
                                 </td>
                             </tr>
                         {% endfor %}
                         </tbody>
                     </table>
                 </div>
+                <div class="d-flex justify-content-end mt-3">
+                    <button class="btn btn-warning px-4 w-100 w-md-auto" onclick="saveAllKeywords()">全部保存</button>
+                </div>
             </div>
-        </div>
-        <div class="d-flex justify-content-end mt-3">
-            <button class="btn btn-warning" onclick="saveAllKeywords()">全部保存</button>
         </div>
     </div>
     <script src="/static/keywords.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
     <script>
     function onActionChangeCheckbox() {
         var addForm = document.getElementById('add-form');
