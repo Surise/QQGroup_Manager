@@ -2,12 +2,122 @@ import json
 import os
 from flask import Flask, request, render_template, redirect, url_for, jsonify
 import requests
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+import threading
+from functools import partial
+from queue import Queue, Empty
+import time
 
 app = Flask(__name__)
 
 KEYWORDS_FILE = os.path.join(os.path.dirname(__file__), 'keywords.json')
 WELCOME_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'welcome_config.json')
 ONEBOT_API = "http://localhost:3000"
+
+# 创建线程池用于处理API请求
+# 调整线程池大小以适应更高并发
+executor = ThreadPoolExecutor(max_workers=20)
+
+# 创建会话以复用连接
+session = requests.Session()
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=20,
+    pool_maxsize=20,
+    max_retries=3
+)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
+
+# 添加超时设置
+REQUEST_TIMEOUT = 5
+
+# 消息队列用于批量处理
+message_queue = Queue()
+welcome_queue = Queue()
+
+# 新增异步处理函数
+def process_welcome(group_id, message):
+    """异步处理欢迎消息"""
+    send_group_msg_internal(group_id, message)
+
+def process_message_internal(message, group_id, user_id, message_id, self_id):
+    """内部处理群消息的实现"""
+    keywords = load_keywords()
+    
+    for cfg in keywords:
+        kw = cfg.get("keyword")
+        if kw and kw in message:
+            if not is_bot_admin(group_id, self_id):
+                break
+
+            actions = cfg.get("action")
+            if isinstance(actions, str):
+                actions = [actions]
+            elif not isinstance(actions, list):
+                continue
+
+            for action in actions:
+                if action == "recall":
+                    recall_message(message_id)
+                elif action == "ban":
+                    ban_user(group_id, user_id, cfg.get("duration", 60))
+                elif action == "kick":
+                    kick_user(group_id, user_id)
+                elif action == "reply":
+                    send_group_msg_internal(group_id, cfg.get("reply", ""))
+            break
+
+def process_message(message, group_id, user_id, message_id, self_id):
+    """异步处理群消息"""
+    executor.submit(process_message_internal, message, group_id, user_id, message_id, self_id)
+
+# 启动后台处理线程
+def start_background_threads():
+    # 启动消息处理线程
+    message_thread = threading.Thread(target=message_processor, daemon=True)
+    message_thread.start()
+    
+    # 启动欢迎消息处理线程
+    welcome_thread = threading.Thread(target=welcome_processor, daemon=True)
+    welcome_thread.start()
+
+def message_processor():
+    """后台处理群消息的线程"""
+    while True:
+        try:
+            # 从队列获取消息，超时1秒
+            item = message_queue.get(timeout=1)
+            if item is None:
+                break
+            
+            message, group_id, user_id, message_id, self_id = item
+            process_message_internal(message, group_id, user_id, message_id, self_id)
+            message_queue.task_done()
+        except Empty:
+            continue
+        except Exception as e:
+            print(f"消息处理出错: {e}")
+
+def welcome_processor():
+    """后台处理欢迎消息的线程"""
+    while True:
+        try:
+            # 从队列获取欢迎消息，超时1秒
+            item = welcome_queue.get(timeout=1)
+            if item is None:
+                break
+            
+            group_id, message = item
+            send_group_msg_internal(group_id, message)
+            welcome_queue.task_done()
+        except Empty:
+            continue
+        except Exception as e:
+            print(f"欢迎消息处理出错: {e}")
+
+# 在应用启动时启动后台线程
+start_background_threads()
 
 
 def load_keywords():
@@ -33,41 +143,52 @@ def save_welcome_config(config):
 
 def is_bot_admin(group_id, self_id):
     try:
-        response = requests.post(f"{ONEBOT_API}/get_group_member_info", json={
+        response = session.post(f"{ONEBOT_API}/get_group_member_info", json={
             "group_id": group_id,
             "user_id": self_id
-        }, timeout=5)
+        }, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
         if data.get('status') == 'ok' and data.get('data'):
             role = data['data'].get('role')
             return role in ['admin', 'owner']
     except requests.exceptions.RequestException as e:
-        print(f"\u6743\u9650\u68c0\u67e5\u5931\u8d25: {e}")
+        print(f"权限检查失败: {e}")
     return False
 
 
 def recall_message(message_id):
-    requests.post(f"{ONEBOT_API}/delete_msg", json={"message_id": message_id})
+    # 使用线程池异步执行API请求
+    executor.submit(session.post, f"{ONEBOT_API}/delete_msg", json={"message_id": message_id}, timeout=REQUEST_TIMEOUT)
 
 def ban_user(group_id, user_id, duration):
-    requests.post(f"{ONEBOT_API}/set_group_ban", json={
+    # 使用线程池异步执行API请求
+    executor.submit(session.post, f"{ONEBOT_API}/set_group_ban", json={
         "group_id": group_id,
         "user_id": user_id,
         "duration": duration
-    })
+    }, timeout=REQUEST_TIMEOUT)
 
 def kick_user(group_id, user_id):
-    requests.post(f"{ONEBOT_API}/set_group_kick", json={
+    # 使用线程池异步执行API请求
+    executor.submit(session.post, f"{ONEBOT_API}/set_group_kick", json={
         "group_id": group_id,
         "user_id": user_id
-    })
+    }, timeout=REQUEST_TIMEOUT)
+
+def send_group_msg_internal(group_id, text):
+    """直接发送群消息的内部实现"""
+    try:
+        session.post(f"{ONEBOT_API}/send_group_msg", json={
+            "group_id": group_id,
+            "message": [{"type": "text", "data": {"text": text}}]
+        }, timeout=REQUEST_TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        print(f"发送群消息失败: {e}")
 
 def send_group_msg(group_id, text):
-    requests.post(f"{ONEBOT_API}/send_group_msg", json={
-        "group_id": group_id,
-        "message": [{"type": "text", "data": {"text": text}}]
-    })
+    """使用线程池异步执行API请求"""
+    executor.submit(send_group_msg_internal, group_id, text)
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -80,7 +201,8 @@ def on_event_or_keywords():
             user_id = data["user_id"]
             welcome_config = load_welcome_config()
             if welcome_config.get("enabled") and welcome_config.get("message"):
-                send_group_msg(group_id, welcome_config["message"])
+                # 将欢迎消息加入队列
+                welcome_queue.put((group_id, welcome_config["message"]))
             return jsonify({})
         if data.get("post_type") == "message" and data.get("message_type") == "group":
             message = "".join([seg["data"].get("text", "") for seg in data["message"] if seg["type"] == "text"])
@@ -88,31 +210,10 @@ def on_event_or_keywords():
             user_id = data["user_id"]
             message_id = data["message_id"]
             self_id = data.get("self_id")
-            keywords = load_keywords()
-
-            for cfg in keywords:
-                kw = cfg.get("keyword")
-                if kw and kw in message:
-                    if not is_bot_admin(group_id, self_id):
-                        break
-
-                    actions = cfg.get("action")
-                    if isinstance(actions, str):
-                        actions = [actions]
-                    elif not isinstance(actions, list):
-                        continue
-
-                    for action in actions:
-                        if action == "recall":
-                            recall_message(message_id)
-                        elif action == "ban":
-                            ban_user(group_id, user_id, cfg.get("duration", 60))
-                        elif action == "kick":
-                            kick_user(group_id, user_id)
-                        elif action == "reply":
-                            send_group_msg(group_id, cfg.get("reply", ""))
-                    break
-        return jsonify({})
+            
+            # 将消息处理加入队列
+            message_queue.put((message, group_id, user_id, message_id, self_id))
+            return jsonify({})
 
     # Keyword form handling
     keywords = load_keywords()
@@ -196,4 +297,5 @@ def delete_keyword(idx):
 app.static_folder = 'static'
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080)
+
