@@ -8,10 +8,5 @@
     ],
     "reply": "提他干嘛",
     "duration": 1
-  },
-  {
-    "keyword": "123321123",
-    "action": "reply",
-    "reply": "我在~"
   }
 ]
