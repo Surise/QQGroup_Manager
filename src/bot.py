@@ -8,12 +8,36 @@ import threading
 from functools import partial
 from queue import Queue, Empty
 import time
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
 
 app = Flask(__name__)
 
 KEYWORDS_FILE = os.path.join(os.path.dirname(__file__), 'keywords.json')
 WELCOME_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'welcome_config.json')
+REG_CODES_FILE = os.path.join(os.path.dirname(__file__), 'reg_codes.json')
 ONEBOT_API = "http://localhost:3000"
+
+# 邮件配置
+EMAIL_CONFIG = {
+    'smtp_server': 'smtp.qq.com',
+    'smtp_port': 465,
+    'sender_email': 'XXX@qq.com',
+    'sender_password': 'XXXX',
+    'recipient_email': '2858819642@qq.com'
+}
+
+# API服务器配置
+API_SERVER = "http://XXX.XXX.XXX.XXX:8080"
+API_USER_ID = "XX"
+API_PASSWORD = "XX"
+
+# 全局变量存储访问令牌
+access_token = None
+token_lock = threading.Lock()
+token_last_updated = 0
+TOKEN_LIFETIME = 3600
 
 # 创建线程池用于处理API请求
 # 调整线程池大小以适应更高并发
@@ -41,8 +65,106 @@ def process_welcome(group_id, message):
     """异步处理欢迎消息"""
     send_group_msg_internal(group_id, message)
 
+def get_access_token():
+    """获取API访问令牌"""
+    global access_token, token_last_updated
+    
+    url = f"{API_SERVER}/api/auth/token"
+    payload = {
+        "userId": API_USER_ID,
+        "password": API_PASSWORD
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "QQGroupManager/1.0"
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        
+        result = response.json()
+        if result.get("status") == "success":
+            with token_lock:
+                access_token = result.get("token")
+                token_last_updated = time.time()
+            print("访问令牌获取成功")
+            return access_token
+        else:
+            print(f"获取令牌失败: {result.get('message')}")
+            return None
+    except Exception as e:
+        print(f"获取访问令牌时出错: {e}")
+        return None
+
+def is_token_expired():
+    """检查令牌是否过期"""
+    with token_lock:
+        # 检查令牌是否存在
+        if not access_token:
+            return True
+            
+        # 检查令牌是否过期（基于时间）
+        if time.time() - token_last_updated > TOKEN_LIFETIME:
+            return True
+            
+        return False
+
+def ensure_valid_token():
+    """确保拥有有效的令牌"""
+    if is_token_expired():
+        print("令牌已过期，正在重新获取...")
+        return get_access_token() is not None
+    return True
+
+def generate_registration_code():
+    """生成新注册码"""
+    # 确保拥有有效的令牌
+    if not ensure_valid_token():
+        print("无法获取有效的访问令牌，无法生成注册码")
+        return False
+    url = f"{API_SERVER}/api/code"
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+    print(headers)
+    try:
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        
+        result = response.json()
+        print(result)
+        if result.get("status") == "success":
+            print("注册码生成成功")
+            return result.get("code")
+        else:
+            print(f"生成注册码失败: {result.get('message')}")
+            return result.get('message')
+    except Exception as e:
+        print(f"生成注册码时出错: {e}")
+        return e
+
 def process_message_internal(message, group_id, user_id, message_id, self_id):
     """内部处理群消息的实现"""
+    # 特殊处理：如果消息是"#getcode"则发送邮件
+    if message == "#getcode":
+        recipient_email = f"{user_id}@qq.com"
+        reply_group_msg_internal(group_id, "已发送激活码，请到邮箱查收！", message_id)
+        # 查找用户是否已有注册码
+        reg_codes = load_reg_codes()
+        if str(user_id) in reg_codes:
+            # 如果用户已有注册码，则直接发送已有的
+            kami = reg_codes[str(user_id)]
+            send_email("Noblefull Client注册码", kami, recipient_email, user_id, 'mail_two.html')
+        else:
+            # 生成新注册码
+            kami=generate_registration_code()
+            # 保存用户ID与注册码的对应关系
+            reg_codes[str(user_id)] = kami
+            save_reg_codes(reg_codes)
+            send_email("Noblefull Client注册码", kami, recipient_email, user_id)
+        return
+    
     keywords = load_keywords()
     
     for cfg in keywords:
@@ -116,8 +238,9 @@ def welcome_processor():
         except Exception as e:
             print(f"欢迎消息处理出错: {e}")
 
-# 在应用启动时启动后台线程
+# 在应用启动时启动后台线程和获取访问令牌
 start_background_threads()
+get_access_token()
 
 
 def load_keywords():
@@ -140,6 +263,44 @@ def save_welcome_config(config):
     with open(WELCOME_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
+def load_reg_codes():
+    """加载注册码配置文件"""
+    if not os.path.exists(REG_CODES_FILE):
+        return {}
+    with open(REG_CODES_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def save_reg_codes(reg_codes):
+    """保存注册码配置文件"""
+    with open(REG_CODES_FILE, 'w', encoding='utf-8') as f:
+        json.dump(reg_codes, f, ensure_ascii=False, indent=2)
+
+def send_email(subject, content, recipient_email, user_id, template='mail.html'):
+    """发送邮件"""
+    try:
+        # 读取HTML邮件模板
+        with open(os.path.join(os.path.dirname(__file__), template), 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # 替换注册码和用户名称占位符
+        html_content = html_content.replace('[注册码]', content)
+        html_content = html_content.replace('[用户名称]', str(user_id))
+        
+        # 创建邮件对象
+        message = MIMEText(html_content, 'html', 'utf-8')
+        message['From'] = Header(EMAIL_CONFIG['sender_email'])
+        message['To'] = Header(recipient_email)
+        message['Subject'] = Header(subject, 'utf-8')
+        
+        # 连接SMTP服务器并发送邮件 (使用SSL连接QQ邮箱)
+        server = smtplib.SMTP_SSL(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port'])
+        server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+        server.sendmail(EMAIL_CONFIG['sender_email'], [recipient_email], message.as_string())
+        server.quit()
+        print("邮件发送成功")
+    except Exception as e:
+        print(f"邮件发送失败: {e}")
+
 
 def is_bot_admin(group_id, self_id):
     try:
@@ -160,6 +321,7 @@ def is_bot_admin(group_id, self_id):
 def recall_message(message_id):
     # 使用线程池异步执行API请求
     executor.submit(session.post, f"{ONEBOT_API}/delete_msg", json={"message_id": message_id}, timeout=REQUEST_TIMEOUT)
+
 
 def ban_user(group_id, user_id, duration):
     # 使用线程池异步执行API请求
@@ -185,6 +347,29 @@ def send_group_msg_internal(group_id, text):
         }, timeout=REQUEST_TIMEOUT)
     except requests.exceptions.RequestException as e:
         print(f"发送群消息失败: {e}")
+
+def reply_group_msg_internal(group_id, text, message_id):
+    """回复群消息的内部实现"""
+    try:
+        session.post(f"{ONEBOT_API}/send_group_msg", json={
+            "group_id": group_id,
+            "message": [
+                {
+                    "type": "reply",
+                    "data": {
+                        "id": message_id
+                    }
+                },
+                {
+                    "type": "text",
+                    "data": {
+                        "text": text
+                    }
+                }
+            ]
+        }, timeout=REQUEST_TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        print(f"回复群消息失败: {e}")
 
 def send_group_msg(group_id, text):
     """使用线程池异步执行API请求"""
@@ -298,4 +483,3 @@ app.static_folder = 'static'
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
-
