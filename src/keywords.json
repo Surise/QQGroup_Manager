@@ -1,12 +1,7 @@
 [
   {
-    "keyword": "rzx",
-    "action": [
-      "reply",
-      "ban",
-      "recall"
-    ],
-    "reply": "提他干嘛",
-    "duration": 1
+    "keyword": "天鱼",
+    "action": "reply",
+    "reply": "我在"
   }
 ]
